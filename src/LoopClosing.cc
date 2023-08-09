@@ -27,7 +27,7 @@
 
 #include<mutex>
 #include<thread>
-
+#define usleep(usec) std::this_thread::sleep_for(std::chrono::microseconds(usec))
 
 namespace ORB_SLAM3
 {

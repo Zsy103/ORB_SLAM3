@@ -1,7 +1,7 @@
 /**
 * This file is part of ORB-SLAM3
 *
-* Copyright (C) 2017-2021 Carlos Campos, Richard Elvira, Juan J. Gómez Rodríguez, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
+* Copyright (C) 2017-2020 Carlos Campos, Richard Elvira, Juan J. Gómez Rodríguez, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
 * Copyright (C) 2014-2016 Raúl Mur-Artal, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
 *
 * ORB-SLAM3 is free software: you can redistribute it and/or modify it under the terms of the GNU General Public
@@ -25,12 +25,12 @@
 #include <sstream>
 
 #include <opencv2/core/core.hpp>
-
+#define COMPILEDWITHC11
 
 #include<System.h>
 #include "ImuTypes.h"
 #include "Optimizer.h"
-
+#define usleep(usec) std::this_thread::sleep_for(std::chrono::microseconds(usec))
 using namespace std;
 
 void LoadImages(const string &strPathLeft, const string &strPathRight, const string &strPathTimes,
@@ -121,6 +121,36 @@ int main(int argc, char **argv)
         return -1;
     }
 
+    cv::Mat K_l, K_r, P_l, P_r, R_l, R_r, D_l, D_r;
+    fsSettings["LEFT.K"] >> K_l;
+    fsSettings["RIGHT.K"] >> K_r;
+
+    fsSettings["LEFT.P"] >> P_l;
+    fsSettings["RIGHT.P"] >> P_r;
+
+    fsSettings["LEFT.R"] >> R_l;
+    fsSettings["RIGHT.R"] >> R_r;
+
+    fsSettings["LEFT.D"] >> D_l;
+    fsSettings["RIGHT.D"] >> D_r;
+
+    int rows_l = fsSettings["LEFT.height"];
+    int cols_l = fsSettings["LEFT.width"];
+    int rows_r = fsSettings["RIGHT.height"];
+    int cols_r = fsSettings["RIGHT.width"];
+
+    if(K_l.empty() || K_r.empty() || P_l.empty() || P_r.empty() || R_l.empty() || R_r.empty() || D_l.empty() || D_r.empty() ||
+            rows_l==0 || rows_r==0 || cols_l==0 || cols_r==0)
+    {
+        cerr << "ERROR: Calibration parameters to rectify stereo are missing!" << endl;
+        return -1;
+    }
+
+    cv::Mat M1l,M2l,M1r,M2r;
+    cv::initUndistortRectifyMap(K_l,D_l,R_l,P_l.rowRange(0,3).colRange(0,3),cv::Size(cols_l,rows_l),CV_32F,M1l,M2l);
+    cv::initUndistortRectifyMap(K_r,D_r,R_r,P_r.rowRange(0,3).colRange(0,3),cv::Size(cols_r,rows_r),CV_32F,M1r,M2r);
+
+
     // Vector for tracking time statistics
     vector<float> vTimesTrack;
     vTimesTrack.resize(tot_images);
@@ -129,9 +159,9 @@ int main(int argc, char **argv)
     cout.precision(17);
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
-    ORB_SLAM3::System SLAM(argv[1],argv[2],ORB_SLAM3::System::IMU_STEREO, false);
+    ORB_SLAM3::System SLAM(argv[1],argv[2],ORB_SLAM3::System::IMU_STEREO, true);
 
-    cv::Mat imLeft, imRight;
+    cv::Mat imLeft, imRight, imLeftRect, imRightRect;
     for (seq = 0; seq<num_seq; seq++)
     {
         // Seq loop
@@ -161,6 +191,22 @@ int main(int argc, char **argv)
                 return 1;
             }
 
+
+    #ifdef COMPILEDWITHC11
+            std::chrono::steady_clock::time_point t_Start_Rect = std::chrono::steady_clock::now();
+    #else
+            std::chrono::monotonic_clock::time_point t_Start_Rect = std::chrono::monotonic_clock::now();
+    #endif
+            cv::remap(imLeft,imLeftRect,M1l,M2l,cv::INTER_LINEAR);
+            cv::remap(imRight,imRightRect,M1r,M2r,cv::INTER_LINEAR);
+
+    #ifdef COMPILEDWITHC11
+            std::chrono::steady_clock::time_point t_End_Rect = std::chrono::steady_clock::now();
+    #else
+            std::chrono::monotonic_clock::time_point t_End_Rect = std::chrono::monotonic_clock::now();
+    #endif
+
+            t_rect = std::chrono::duration_cast<std::chrono::duration<double> >(t_End_Rect - t_Start_Rect).count();
             double tframe = vTimestampsCam[seq][ni];
 
             // Load imu measurements from previous frame
@@ -182,7 +228,7 @@ int main(int argc, char **argv)
     #endif
 
             // Pass the images to the SLAM system
-            SLAM.TrackStereo(imLeft,imRight,tframe,vImuMeas);
+            SLAM.TrackStereo(imLeftRect,imRightRect,tframe,vImuMeas);
 
     #ifdef COMPILEDWITHC11
             std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
@@ -207,7 +253,7 @@ int main(int argc, char **argv)
                 T = tframe-vTimestampsCam[seq][ni-1];
 
             if(ttrack<T)
-                usleep((T-ttrack)*1e6); // 1e6
+                usleep(int((T-ttrack)*1e6)); // 1e6
         }
 
         if(seq < num_seq - 1)
