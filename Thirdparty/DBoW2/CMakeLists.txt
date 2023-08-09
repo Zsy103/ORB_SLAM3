@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 2.8)
 project(DBoW2)
+SET(CMAKE_TOOLCHAIN_FILE "D:/vcpkg/vcpkg/scripts/buildsystems/vcpkg.cmake")
+add_definitions(-DWINDOWS)
+list(APPEND CMAKE_PREFIX_PATH D:\\opencv4.4\\opencv\\build\\x64\\vc15\\lib)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
